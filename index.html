@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>鼻整形シミュレーション v1.1</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#f4f4f4;color:#222;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif}
+body{touch-action:manipulation}
+header{height:48px;padding:8px 14px;background:#fff;border-bottom:1px solid #ddd;display:flex;align-items:center;justify-content:space-between;gap:12px;overflow:hidden}
+h1{font-size:17px;margin:0;white-space:nowrap}.sub{font-size:11px;color:#777;white-space:nowrap}
+main{width:100%;height:calc(100dvh - 48px);padding:8px 10px;display:flex;flex-direction:column;gap:7px;overflow:hidden}
+.step{font-size:12px;font-weight:700;margin:0;color:#444}
+.angles{height:42px;display:grid;grid-template-columns:repeat(5,1fr);gap:6px;flex:0 0 42px}
+.angle{border:1px solid #ccc;border-radius:8px;background:#fff;padding:5px 3px;font-size:12px;min-width:0}.angle.active{border:2px solid #222}.angle.loaded{background:#eee}
+.topline{display:flex;align-items:center;gap:7px;min-height:32px;flex:0 0 32px}.pick{width:auto;min-width:190px;border:0;border-radius:8px;background:#222;color:#fff;padding:8px 12px;margin:0;font-size:12px;font-weight:600}
+.status{flex:1;min-width:0;background:#fff;border-radius:8px;padding:7px 10px;margin:0;font-size:11px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ok{border-left:4px solid #2e7d32}.err{border-left:4px solid #c62828}.wait{border-left:4px solid #ef6c00}
+.workspace{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.65fr) minmax(390px,1fr);gap:8px;overflow:hidden}
+.imagePanel,.controlPanel{background:#fff;border-radius:10px;border:1px solid #e2e2e2;min-height:0;overflow:hidden}
+.imagePanel{display:flex;flex-direction:column;padding:7px}.imageHeader{height:28px;display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:700;flex:0 0 28px}.imageHeader span{font-weight:400;color:#777;font-size:10px}
+.canvasWrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;background:#ddd;border-radius:8px;overflow:hidden}.canvasWrap canvas{max-width:100%;max-height:100%;width:auto;height:auto;display:block;background:#ddd;border-radius:8px;touch-action:none}
+.controlPanel{padding:7px;display:flex;flex-direction:column}.controlTitle{font-size:12px;font-weight:700;height:28px;display:flex;align-items:center;justify-content:space-between;flex:0 0 28px}.controlTitle span{font-size:10px;color:#777;font-weight:400}
+.grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(7,minmax(0,1fr));gap:5px;flex:1;min-height:0}
+.control{border:1px solid #ddd;border-radius:7px;padding:4px 7px;min-width:0;display:flex;flex-direction:column;justify-content:center}.control label{font-size:10px;line-height:1.1;white-space:nowrap}.value{float:right;color:#666;font-size:10px}input[type=range]{width:100%;height:18px;margin:1px 0 0;accent-color:#222}
+.bottom{height:42px;display:grid;grid-template-columns:repeat(7,1fr);gap:6px;flex:0 0 42px}.bottom button{min-width:0}
+button{border:0;border-radius:7px;background:#222;color:#fff;padding:8px 5px;font-size:11px}button.secondary{background:#777}button:disabled{opacity:.4}
+.summary{height:28px;display:flex;gap:5px;align-items:center;overflow:hidden}.badge{font-size:9px;padding:4px 6px;background:#eee;border-radius:14px;white-space:nowrap}
+.note{font-size:10px;color:#777;line-height:1.35}.hidden{display:none!important}
+.videoModal{position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:50;display:flex;align-items:center;justify-content:center;padding:18px}.videoCard{width:min(560px,92vw);height:min(92vh,760px);background:#fff;border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px}.videoHead{display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:700}.videoHead button{padding:6px 10px}.videoBody{flex:1;min-height:0;background:#111;border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden}.videoBody video{max-width:100%;max-height:100%;width:auto;height:auto;background:#111}.videoActions{display:grid;grid-template-columns:1fr 1fr;gap:6px}.progress{height:6px;background:#ddd;border-radius:8px;overflow:hidden}.bar{height:100%;width:0;background:#222}
+@media (orientation:portrait){
+ main{padding:6px;gap:5px}.workspace{grid-template-columns:minmax(0,1fr) minmax(255px,.78fr)}.pick{min-width:160px}.control{padding:3px 5px}.control label{font-size:9px}input[type=range]{height:16px}.bottom{grid-template-columns:repeat(7,1fr)}
+}
+@media (max-width:760px){header .sub{display:none}.workspace{grid-template-columns:minmax(0,1.35fr) minmax(250px,1fr)}.bottom button{font-size:10px}}
+</style>
+</head>
+<body>
+<header><h1>鼻整形シミュレーション v1.1</h1><div class="sub">5方向・鼻ランドマーク・スケール正規化・180°動画</div></header>
+<main>
+<div class="step">1. 5方向の写真</div>
+<div class="angles" id="angles"></div>
+<div class="topline">
+  <button class="pick" id="pickBtn">選択中の方向に写真を追加</button>
+  <input id="file" type="file" accept="image/*" style="display:none">
+  <div id="status" class="status wait">写真を選択してください。</div>
+</div>
+<div class="workspace">
+  <section class="imagePanel">
+    <div class="imageHeader"><b id="viewTitle">正面</b><span>画像上で鼻領域を確認・調整</span></div>
+    <div class="canvasWrap"><canvas id="canvas"></canvas></div>
+  </section>
+  <section class="controlPanel">
+    <div class="controlTitle">2. 調整項目 <span>14項目・5方向共通</span></div>
+    <div class="grid" id="controls"></div>
+  </section>
+</div>
+<div class="summary" id="summary"></div>
+<div class="bottom">
+  <button id="detect" disabled>鼻を自動判定</button>
+  <button id="points" class="secondary" disabled>判定点</button>
+  <button id="manual" class="secondary" disabled>手動指定</button>
+  <button id="reset" class="secondary" disabled>リセット</button>
+  <button id="save" disabled>PNG保存</button>
+  <button id="normalize">5枚を基準化</button>
+  <button id="makeVideo" disabled>180°動画</button>
+</div>
+<div id="videoModal" class="videoModal hidden">
+  <div class="videoCard">
+    <div class="videoHead"><span>180°回転動画 プレビュー</span><button id="closeVideo" class="secondary">閉じる</button></div>
+    <div class="videoBody"><video id="video" controls playsinline></video></div>
+    <div class="progress"><div class="bar" id="bar"></div></div>
+    <div class="note">現在は5枚のキーフレーム間をブラウザ内でクロスフェードしています。本番ではAIによる中間角度生成を接続します。</div>
+    <div class="videoActions"><button id="downloadVideo" disabled>動画を保存</button><button id="closeVideo2" class="secondary">閉じる</button></div>
+  </div>
+</div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+<script>
+const names=["左横方向","左斜め","正面","右斜め","右横方向"];
+const anglesEl=document.getElementById("angles"), file=document.getElementById("file");
+const canvas=document.getElementById("canvas"),ctx=canvas.getContext("2d");
+const statusEl=document.getElementById("status");
+const video=document.getElementById("video");
+let current=2, images={}, img=null, mask=null, points=[], showPoints=false, manual=false;
+let detector=null, detectorReady=false, mediaRecorder=null, chunks=[], videoBlob=null;
+
+const controlNames=["鼻背高さ","鼻先高さ","鼻先細さ","鼻骨細さ","鼻翼細さ","鼻根幅","鼻背幅","鼻先幅","鼻翼幅","鼻柱長さ","鼻根高さ","輪郭線","鼻先方向","鼻先形状"];
+const ranges=controlNames.map(()=>0);
+
+names.forEach((n,i)=>{const b=document.createElement("button");b.className="angle";b.textContent=n;b.id="a"+i;b.onclick=()=>selectAngle(i);anglesEl.appendChild(b)});
+controlNames.forEach((n,i)=>{
+ const d=document.createElement("div");d.className="control";
+ d.innerHTML=`<label>No.${i+1} ${n}<span class="value" id="v${i}">0</span></label><input type="range" min="-100" max="100" value="0">`;
+ d.querySelector("input").oninput=e=>{ranges[i]=+e.target.value;document.getElementById("v"+i).textContent=e.target.value};
+ document.getElementById("controls").appendChild(d)
+});
+
+function status(t,c=""){statusEl.textContent=t;statusEl.className="status "+c}
+function selectAngle(i){
+ current=i;document.getElementById("viewTitle").textContent=names[i];document.querySelectorAll(".angle").forEach((b,j)=>b.classList.toggle("active",j===i));
+ const d=images[i];img=d?.img||null;mask=d?.mask||null;points=d?.points||[];showPoints=false;
+ if(img){enable(true);draw();status(d.auto?"自動判定済み":"写真を読み込みました。自動判定してください。",d.auto?"ok":"")}
+ else{enable(false);ctx.clearRect(0,0,canvas.width,canvas.height);status("この方向の写真は未登録です。")}
+ updateSummary()
+}
+function enable(on){["detect","points","manual","reset","save"].forEach(id=>document.getElementById(id).disabled=!on);document.getElementById("makeVideo").disabled=!allLoaded()}
+function allLoaded(){return [0,1,2,3,4].every(i=>images[i]?.img)}
+function updateSummary(){
+ document.getElementById("summary").innerHTML=names.map((n,i)=>{
+   const d=images[i];return `<span class="badge">${n}：${d?.img?"登録済み":"未登録"}${d?.auto?" / 判定済み":""}</span>`
+ }).join("")
+}
+document.getElementById("pickBtn").onclick=()=>file.click();
+file.onchange=e=>{
+ const f=e.target.files?.[0];if(!f)return;
+ const u=URL.createObjectURL(f),im=new Image();
+ im.onload=()=>{images[current]={img:im,auto:false,mask:null,points:[],faceScale:null,faceCenter:null,yaw:null};document.getElementById("a"+current).classList.add("loaded");img=im;mask=null;points=[];enable(true);draw();status("写真を読み込みました。自動判定してください。");updateSummary();URL.revokeObjectURL(u);file.value=""};
+ im.onerror=()=>{status("写真を読み込めませんでした。","err");file.value=""};
+ im.src=u;
+};
+function draw(){
+ if(!img)return;
+ const s=Math.min(1,1600/Math.max(img.naturalWidth,img.naturalHeight));
+ canvas.width=Math.round(img.naturalWidth*s);canvas.height=Math.round(img.naturalHeight*s);
+ ctx.clearRect(0,0,canvas.width,canvas.height);ctx.drawImage(img,0,0,canvas.width,canvas.height);
+ if(mask)drawMask(mask)
+}
+function drawMask(poly){
+ ctx.save();ctx.fillStyle="rgba(30,120,255,.10)";ctx.strokeStyle="rgba(30,120,255,.95)";ctx.lineWidth=2;
+ ctx.beginPath();poly.forEach((p,i)=>i?ctx.lineTo(p.x*canvas.width,p.y*canvas.height):ctx.moveTo(p.x*canvas.width,p.y*canvas.height));ctx.closePath();ctx.fill();ctx.stroke();
+ if(showPoints){ctx.fillStyle="#0055cc";points.forEach(p=>{ctx.beginPath();ctx.arc(p.x*canvas.width,p.y*canvas.height,3.5,0,Math.PI*2);ctx.fill()})}
+ ctx.restore()
+}
+function initDetector(){
+ try{
+  if(typeof FaceMesh==="undefined"){status("自動判定エンジンを読み込めませんでした。","err");return}
+  detector=new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`});
+  detector.setOptions({maxNumFaces:1,refineLandmarks:true,minDetectionConfidence:.5,minTrackingConfidence:.5});
+  detector.onResults(r=>{
+   if(!window.__resolve)return;
+   const q=window.__resolve;window.__resolve=null;q(r.multiFaceLandmarks?.[0]||null)
+  });
+  detectorReady=true;status("自動判定エンジン：準備完了。")
+ }catch(e){status("自動判定エンジンの初期化に失敗しました。","err")}
+}
+setTimeout(initDetector,100);
+async function runLandmark(){
+ if(!detectorReady)return null;
+ return new Promise(async resolve=>{
+  window.__resolve=resolve;
+  const timer=setTimeout(()=>{if(window.__resolve===resolve){window.__resolve=null;resolve(null)}},8000);
+  try{await detector.send({image:img});clearTimeout(timer)}catch(e){clearTimeout(timer);window.__resolve=null;resolve(null)}
+ })
+}
+document.getElementById("detect").onclick=async()=>{
+ if(!img)return;const b=document.getElementById("detect");b.disabled=true;status("顔の判定点を解析しています…","wait");
+ const lm=await runLandmark();
+ if(!lm){status("自動判定に失敗しました。手動指定を使用できます。","err");b.disabled=false;return}
+ const by=i=>({x:lm[i].x,y:lm[i].y});
+ const ids=[168,6,197,195,5,4,1,2,98,327,129,358];points=ids.map(by);
+ const rootL={x:(by(168).x+by(98).x)/2,y:by(168).y},rootR={x:(by(168).x+by(327).x)/2,y:by(168).y};
+ const bridgeL={x:by(6).x-(by(6).x-by(98).x)*.20,y:by(6).y},bridgeR={x:by(6).x+(by(327).x-by(6).x)*.20,y:by(6).y};
+ const tip={x:(by(1).x+by(2).x+by(4).x)/3,y:(by(1).y+by(2).y+by(4).y)/3};
+ const alarL={x:by(129).x+(tip.x-by(129).x)*.20,y:by(129).y+(tip.y-by(129).y)*.10},alarR={x:by(358).x+(tip.x-by(358).x)*.20,y:by(358).y+(tip.y-by(358).y)*.10};
+ const colL={x:tip.x-(tip.x-by(1).x)*.28,y:tip.y+(by(1).y-tip.y)*.20},colR={x:tip.x+(by(1).x-tip.x)*.28,y:tip.y+(by(1).y-tip.y)*.20};
+ mask=[rootL,bridgeL,{x:tip.x-(tip.x-alarL.x)*.55,y:tip.y-(tip.y-alarL.y)*.32},alarL,colL,{x:tip.x,y:tip.y+(colL.y-tip.y)*.55},colR,alarR,{x:tip.x+(alarR.x-tip.x)*.55,y:tip.y-(tip.y-alarR.y)*.32},bridgeR,rootR];
+ const cx=mask.reduce((s,p)=>s+p.x,0)/mask.length,cy=mask.reduce((s,p)=>s+p.y,0)/mask.length;
+ mask=mask.map(p=>({x:cx+(p.x-cx)*.92,y:cy+(p.y-cy)*.94}));
+ // Face scale/center and coarse yaw proxy. Scale uses inter-eye distance; no pose correction.
+ const eyeL=by(33),eyeR=by(263),eyeDist=Math.hypot(eyeR.x-eyeL.x,eyeR.y-eyeL.y);
+ const center={x:(eyeL.x+eyeR.x)/2,y:(eyeL.y+eyeR.y)/2};
+ const yaw=Math.atan2((by(263).z||0)-(by(33).z||0),Math.max(.001,eyeDist))*180/Math.PI;
+ images[current]={...images[current],img,auto:true,mask,points,faceScale:eyeDist,faceCenter:center,yaw};
+ showPoints=true;draw();status(`自動判定：完了。鼻領域を生成しました。顔基準サイズを記録しました。`,"ok");b.disabled=false;updateSummary();document.getElementById("makeVideo").disabled=!allLoaded()
+};
+document.getElementById("points").onclick=()=>{showPoints=!showPoints;draw()};
+document.getElementById("manual").onclick=()=>{manual=true;mask=null;showPoints=false;draw();status("手動指定：画像上で鼻の範囲をドラッグしてください。","wait")};
+let drag=null;
+canvas.addEventListener("pointerdown",e=>{if(!manual)return;const r=canvas.getBoundingClientRect();drag={x:(e.clientX-r.left)/r.width,y:(e.clientY-r.top)/r.height}});
+canvas.addEventListener("pointerup",e=>{if(!manual||!drag)return;const r=canvas.getBoundingClientRect(),x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;
+ const x1=Math.min(x,drag.x),x2=Math.max(x,drag.x),y1=Math.min(y,drag.y),y2=Math.max(y,drag.y);mask=[{x:x1,y:y1},{x:x2,y:y1},{x:x2,y:y2},{x:x1,y:y2}];manual=false;images[current]={...images[current],img,auto:false,mask,points:[]};draw();status("手動の鼻領域を設定しました。","ok")});
+document.getElementById("reset").onclick=()=>{mask=null;points=[];showPoints=false;manual=false;document.querySelectorAll('input[type=range]').forEach((r,i)=>{r.value=0;ranges[i]=0;document.getElementById("v"+i).textContent="0"});draw();status("リセットしました。")};
+document.getElementById("save").onclick=()=>{canvas.toBlob(b=>{const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=`nose_sim_${names[current]}.png`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)},"image/png")};
+
+// Normalize each image into a common canvas for video. This does not alter facial geometry;
+// it only scales/translates the full image using the recorded eye distance and center.
+function normalizedFrame(index,W=720,H=1280){
+ const d=images[index];if(!d?.img)return null;
+ const c=document.createElement("canvas");c.width=W;c.height=H;const x=c.getContext("2d");
+ const targetEye=.20*W; // eye distance target in output coordinates
+ const scale=d.faceScale?targetEye/(d.faceScale*W):1;
+ // Correct because faceScale is normalized image coordinates; use image width basis.
+ const pxScale=d.faceScale?targetEye/(d.faceScale*W):1;
+ const cx=d.faceCenter?.x??.5,cy=d.faceCenter?.y??.4;
+ const srcW=d.img.naturalWidth,srcH=d.img.naturalHeight;
+ const faceX=cx*srcW,faceY=cy*srcH;
+ const outCX=.5*W,outCY=.39*H;
+ const dw=srcW*pxScale,dh=srcH*pxScale;
+ x.drawImage(d.img,outCX-faceX*pxScale,outCY-faceY*pxScale,dw,dh);
+ return c;
+}
+document.getElementById("normalize").onclick=()=>{
+ if(!allLoaded()){status("5方向すべての写真を登録してください。","err");return}
+ const vals=[0,1,2,3,4].map(i=>images[i].faceScale).filter(Boolean);
+ status(`5方向を確認しました。顔基準サイズ：${vals.length}/5。向きは補正せず、サイズと位置だけを基準化します。`,"ok")
+};
+
+// Browser-local smooth preview video. Uses crossfade between normalized keyframes.
+// This is intentionally not presented as AI generation.
+async function makePreviewVideo(){
+ if(!allLoaded()){status("5方向すべての写真が必要です。","err");return}
+ if(![0,1,2,3,4].every(i=>images[i].auto)){status("5方向すべてで自動判定を完了してください。","err");return}
+ const frames=[0,1,2,3,4].map(i=>normalizedFrame(i));
+ const W=720,H=1280,fps=20,duration=0.75,steps=Math.round(duration*fps);
+ const vc=document.createElement("canvas");vc.width=W;vc.height=H;const vctx=vc.getContext("2d");
+ const stream=vc.captureStream(fps);
+ let mime="video/mp4"; if(!MediaRecorder.isTypeSupported(mime))mime="video/webm";
+ chunks=[];mediaRecorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:4500000});
+ videoBlob=null;
+ mediaRecorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+ const done=new Promise(resolve=>mediaRecorder.onstop=resolve);
+ mediaRecorder.start();
+ for(let i=0;i<frames.length-1;i++){
+   for(let s=0;s<steps;s++){
+     const t=s/(steps-1);
+     vctx.clearRect(0,0,W,H);vctx.drawImage(frames[i],0,0);
+     vctx.globalAlpha=t;vctx.drawImage(frames[i+1],0,0);vctx.globalAlpha=1;
+     await new Promise(r=>setTimeout(r,1000/fps));
+     document.getElementById("bar").style.width=`${((i+(s+1)/steps)/4)*100}%`;
+   }
+ }
+ mediaRecorder.stop();await done;
+ videoBlob=new Blob(chunks,{type:mime});
+ video.src=URL.createObjectURL(videoBlob);video.classList.remove("hidden");
+ document.getElementById("downloadVideo").disabled=false;
+ status("動画プレビューを生成しました。現在は5枚の間をブラウザ内で補間しています。","ok");
+}
+document.getElementById("makeVideo").onclick=makePreviewVideo;
+document.getElementById("downloadVideo").onclick=()=>{
+ if(!videoBlob)return;
+ const a=document.createElement("a");a.href=URL.createObjectURL(videoBlob);
+ a.download="nose_simulation_180_preview."+((videoBlob.type.includes("mp4"))?"mp4":"webm");a.click();
+ setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+};
+document.getElementById("closeVideo").onclick=()=>document.getElementById("videoModal").classList.add("hidden");
+document.getElementById("closeVideo2").onclick=()=>document.getElementById("videoModal").classList.add("hidden");
+selectAngle(2);
+</script>
+</body>
+</html>
