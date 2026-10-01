@@ -13,7 +13,7 @@ h1{font-size:17px;margin:0;white-space:nowrap}.sub{font-size:11px;color:#777;whi
 main{width:100%;height:calc(100dvh - 48px);padding:8px 10px;display:flex;flex-direction:column;gap:7px;overflow:hidden}
 .step{font-size:12px;font-weight:700;margin:0;color:#444}
 .angles{height:42px;display:grid;grid-template-columns:repeat(5,1fr);gap:6px;flex:0 0 42px}
-.angle{border:1px solid #ccc;border-radius:8px;background:#fff;padding:5px 3px;font-size:12px;min-width:0}.angle.active{border:2px solid #222}.angle.loaded{background:#eee}
+.angle{border:1px solid #ccc;border-radius:8px;background:#fff;color:#222;padding:5px 3px;font-size:12px;min-width:0}.angle.active{border:2px solid #222}.angle.loaded{background:#eee}
 .topline{display:flex;align-items:center;gap:7px;min-height:32px;flex:0 0 32px}.pick{width:auto;min-width:190px;border:0;border-radius:8px;background:#222;color:#fff;padding:8px 12px;margin:0;font-size:12px;font-weight:600}
 .status{flex:1;min-width:0;background:#fff;border-radius:8px;padding:7px 10px;margin:0;font-size:11px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ok{border-left:4px solid #2e7d32}.err{border-left:4px solid #c62828}.wait{border-left:4px solid #ef6c00}
 .workspace{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.65fr) minmax(390px,1fr);gap:8px;overflow:hidden}
@@ -153,26 +153,75 @@ async function runLandmark(){
   try{await detector.send({image:img});clearTimeout(timer)}catch(e){clearTimeout(timer);window.__resolve=null;resolve(null)}
  })
 }
-document.getElementById("detect").onclick=async()=>{
- if(!img)return;const b=document.getElementById("detect");b.disabled=true;status("顔の判定点を解析しています…","wait");
- const lm=await runLandmark();
- if(!lm){status("自動判定に失敗しました。手動指定を使用できます。","err");b.disabled=false;return}
+function buildFrontalMask(lm){
  const by=i=>({x:lm[i].x,y:lm[i].y});
- const ids=[168,6,197,195,5,4,1,2,98,327,129,358];points=ids.map(by);
  const rootL={x:(by(168).x+by(98).x)/2,y:by(168).y},rootR={x:(by(168).x+by(327).x)/2,y:by(168).y};
  const bridgeL={x:by(6).x-(by(6).x-by(98).x)*.20,y:by(6).y},bridgeR={x:by(6).x+(by(327).x-by(6).x)*.20,y:by(6).y};
  const tip={x:(by(1).x+by(2).x+by(4).x)/3,y:(by(1).y+by(2).y+by(4).y)/3};
  const alarL={x:by(129).x+(tip.x-by(129).x)*.20,y:by(129).y+(tip.y-by(129).y)*.10},alarR={x:by(358).x+(tip.x-by(358).x)*.20,y:by(358).y+(tip.y-by(358).y)*.10};
  const colL={x:tip.x-(tip.x-by(1).x)*.28,y:tip.y+(by(1).y-tip.y)*.20},colR={x:tip.x+(by(1).x-tip.x)*.28,y:tip.y+(by(1).y-tip.y)*.20};
- mask=[rootL,bridgeL,{x:tip.x-(tip.x-alarL.x)*.55,y:tip.y-(tip.y-alarL.y)*.32},alarL,colL,{x:tip.x,y:tip.y+(colL.y-tip.y)*.55},colR,alarR,{x:tip.x+(alarR.x-tip.x)*.55,y:tip.y-(tip.y-alarR.y)*.32},bridgeR,rootR];
- const cx=mask.reduce((s,p)=>s+p.x,0)/mask.length,cy=mask.reduce((s,p)=>s+p.y,0)/mask.length;
- mask=mask.map(p=>({x:cx+(p.x-cx)*.92,y:cy+(p.y-cy)*.94}));
- // Face scale/center and coarse yaw proxy. Scale uses inter-eye distance; no pose correction.
+ let poly=[rootL,bridgeL,{x:tip.x-(tip.x-alarL.x)*.55,y:tip.y-(tip.y-alarL.y)*.32},alarL,colL,{x:tip.x,y:tip.y+(colL.y-tip.y)*.55},colR,alarR,{x:tip.x+(alarR.x-tip.x)*.55,y:tip.y-(tip.y-alarR.y)*.32},bridgeR,rootR];
+ return shrinkMask(poly,.92,.94);
+}
+function buildObliqueMask(lm){
+ const by=i=>({x:lm[i].x,y:lm[i].y});
+ const bridge=by(6), upper=by(197), mid=by(195), tip=by(4), tip2=by(1), lower=by(2);
+ const eyeL=by(33),eyeR=by(263),eyeDist=Math.hypot(eyeR.x-eyeL.x,eyeR.y-eyeL.y)||.1;
+ const side=Math.sign((eyeR.x-eyeL.x)||1);
+ const w=eyeDist*.18;
+ let poly=[
+   {x:bridge.x-side*w*.55,y:bridge.y-eyeDist*.08},
+   {x:upper.x-side*w*.75,y:upper.y-eyeDist*.02},
+   {x:mid.x-side*w*.95,y:mid.y+eyeDist*.04},
+   {x:tip.x-side*w*.55,y:tip.y+eyeDist*.04},
+   {x:tip2.x+side*w*.55,y:tip2.y+eyeDist*.07},
+   {x:lower.x+side*w*.65,y:lower.y+eyeDist*.10},
+   {x:tip.x+side*w*.95,y:tip.y+eyeDist*.18},
+   {x:mid.x+side*w*.65,y:mid.y+eyeDist*.12}
+ ];
+ return shrinkMask(poly,.96,.98);
+}
+function buildProfileMask(lm){
+ const by=i=>({x:lm[i].x,y:lm[i].y});
+ const bridge=by(6), upper=by(197), mid=by(195), tip=by(4), tipA=by(1), lower=by(2), root=by(168);
+ const eyeL=by(33),eyeR=by(263),eyeDist=Math.hypot(eyeR.x-eyeL.x,eyeR.y-eyeL.y)||.1;
+ // 横顔では左右の鼻翼ランドマークを信用せず、鼻背→鼻尖→鼻柱の可視輪郭を中心に領域を作る。
+ const dx=tip.x-bridge.x,dy=tip.y-bridge.y,len=Math.hypot(dx,dy)||.001;
+ const nx=-dy/len,ny=dx/len;
+ const thick=eyeDist*.16;
+ const p=(q,t)=>({x:q.x+nx*thick*t,y:q.y+ny*thick*t});
+ let poly=[
+   p(root,-.65),p(bridge,-.75),p(upper,-.9),p(mid,-1),
+   p(tip,.65),p(tipA,1),p(lower,.85),
+   p(tip,-.95),p(mid,.75),p(upper,.7),p(bridge,.65)
+ ];
+ return shrinkMask(poly,.98,1);
+}
+function shrinkMask(poly,sx,sy){
+ const cx=poly.reduce((s,p)=>s+p.x,0)/poly.length,cy=poly.reduce((s,p)=>s+p.y,0)/poly.length;
+ return poly.map(p=>({x:cx+(p.x-cx)*sx,y:cy+(p.y-cy)*sy}));
+}
+function detectMode(i){ return i===2 ? "front" : (i===0||i===4 ? "profile" : "oblique"); }
+
+document.getElementById("detect").onclick=async()=>{
+ if(!img)return;const b=document.getElementById("detect");b.disabled=true;
+ const mode=detectMode(current);
+ status(`${mode==="front"?"正面":mode==="oblique"?"斜め顔":"横顔"}用の判定ロジックで解析しています…`,"wait");
+ const lm=await runLandmark();
+ if(!lm){status("自動判定に失敗しました。手動指定を使用できます。","err");b.disabled=false;return}
+ const ids=[168,6,197,195,5,4,1,2,98,327,129,358];
+ const by=i=>({x:lm[i].x,y:lm[i].y});
+ points=ids.map(by);
+ if(mode==="front") mask=buildFrontalMask(lm);
+ else if(mode==="oblique") mask=buildObliqueMask(lm);
+ else mask=buildProfileMask(lm);
  const eyeL=by(33),eyeR=by(263),eyeDist=Math.hypot(eyeR.x-eyeL.x,eyeR.y-eyeL.y);
  const center={x:(eyeL.x+eyeR.x)/2,y:(eyeL.y+eyeR.y)/2};
- const yaw=Math.atan2((by(263).z||0)-(by(33).z||0),Math.max(.001,eyeDist))*180/Math.PI;
- images[current]={...images[current],img,auto:true,mask,points,faceScale:eyeDist,faceCenter:center,yaw};
- showPoints=true;draw();status(`自動判定：完了。鼻領域を生成しました。顔基準サイズを記録しました。`,"ok");b.disabled=false;updateSummary();document.getElementById("makeVideo").disabled=!allLoaded()
+ const yaw=(mode==="front"?0:(eyeR.x-eyeL.x));
+ images[current]={...images[current],img,auto:true,mask,points,faceScale:eyeDist,faceCenter:center,yaw,detectMode:mode};
+ showPoints=true;draw();
+ status(`${mode==="front"?"正面":mode==="oblique"?"斜め顔":"横顔"}用判定：完了。鼻領域を生成しました。`,"ok");
+ b.disabled=false;updateSummary();document.getElementById("makeVideo").disabled=!allLoaded();
 };
 document.getElementById("points").onclick=()=>{showPoints=!showPoints;draw()};
 document.getElementById("manual").onclick=()=>{manual=true;mask=null;showPoints=false;draw();status("手動指定：画像上で鼻の範囲をドラッグしてください。","wait")};
