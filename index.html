@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>鼻整形シミュレーション v1.1</title>
+<title>鼻整形シミュレーション v1.3</title>
 <style>
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#f4f4f4;color:#222;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif}
@@ -35,7 +35,7 @@ button{border:0;border-radius:7px;background:#222;color:#fff;padding:8px 5px;fon
 </style>
 </head>
 <body>
-<header><h1>鼻整形シミュレーション v1.1</h1><div class="sub">5方向・鼻ランドマーク・スケール正規化・180°動画</div></header>
+<header><h1>鼻整形シミュレーション v1.3</h1><div class="sub">5方向・鼻ランドマーク・スケール正規化・180°動画</div></header>
 <main>
 <div class="step">1. 5方向の写真</div>
 <div class="angles" id="angles"></div>
@@ -136,7 +136,7 @@ function initDetector(){
  try{
   if(typeof FaceMesh==="undefined"){status("自動判定エンジンを読み込めませんでした。","err");return}
   detector=new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`});
-  detector.setOptions({maxNumFaces:1,refineLandmarks:true,minDetectionConfidence:.5,minTrackingConfidence:.5});
+  detector.setOptions({maxNumFaces:1,refineLandmarks:false,staticImageMode:true,minDetectionConfidence:.25,minTrackingConfidence:.25});
   detector.onResults(r=>{
    if(!window.__resolve)return;
    const q=window.__resolve;window.__resolve=null;q(r.multiFaceLandmarks?.[0]||null)
@@ -163,43 +163,37 @@ function buildFrontalMask(lm){
  let poly=[rootL,bridgeL,{x:tip.x-(tip.x-alarL.x)*.55,y:tip.y-(tip.y-alarL.y)*.32},alarL,colL,{x:tip.x,y:tip.y+(colL.y-tip.y)*.55},colR,alarR,{x:tip.x+(alarR.x-tip.x)*.55,y:tip.y-(tip.y-alarR.y)*.32},bridgeR,rootR];
  return shrinkMask(poly,.92,.94);
 }
-function buildObliqueMask(lm){
- const by=i=>({x:lm[i].x,y:lm[i].y});
- const bridge=by(6), upper=by(197), mid=by(195), tip=by(4), tip2=by(1), lower=by(2);
- const eyeL=by(33),eyeR=by(263),eyeDist=Math.hypot(eyeR.x-eyeL.x,eyeR.y-eyeL.y)||.1;
- const side=Math.sign((eyeR.x-eyeL.x)||1);
- const w=eyeDist*.18;
- let poly=[
-   {x:bridge.x-side*w*.55,y:bridge.y-eyeDist*.08},
-   {x:upper.x-side*w*.75,y:upper.y-eyeDist*.02},
-   {x:mid.x-side*w*.95,y:mid.y+eyeDist*.04},
-   {x:tip.x-side*w*.55,y:tip.y+eyeDist*.04},
-   {x:tip2.x+side*w*.55,y:tip2.y+eyeDist*.07},
-   {x:lower.x+side*w*.65,y:lower.y+eyeDist*.10},
-   {x:tip.x+side*w*.95,y:tip.y+eyeDist*.18},
-   {x:mid.x+side*w*.65,y:mid.y+eyeDist*.12}
- ];
- return shrinkMask(poly,.96,.98);
+function point(lm,i){return {x:lm[i].x,y:lm[i].y}}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)||.001}
+function centroid(pts){return {x:pts.reduce((s,p)=>s+p.x,0)/pts.length,y:pts.reduce((s,p)=>s+p.y,0)/pts.length}}
+function convexHull(pts){
+ const a=[...pts].sort((p,q)=>p.x===q.x?p.y-q.y:p.x-q.x);
+ if(a.length<=2)return a;
+ const cross=(o,p,q)=>(p.x-o.x)*(q.y-o.y)-(p.y-o.y)*(q.x-o.x);
+ const lo=[]; for(const p of a){while(lo.length>=2&&cross(lo[lo.length-2],lo[lo.length-1],p)<=0)lo.pop();lo.push(p)}
+ const hi=[]; for(let i=a.length-1;i>=0;i--){const p=a[i];while(hi.length>=2&&cross(hi[hi.length-2],hi[hi.length-1],p)<=0)hi.pop();hi.push(p)}
+ hi.pop();lo.pop();return lo.concat(hi);
 }
+function expandPoly(poly, amount){
+ const c=centroid(poly);return poly.map(p=>{const dx=p.x-c.x,dy=p.y-c.y,l=Math.hypot(dx,dy)||.001;return {x:p.x+dx/l*amount,y:p.y+dy/l*amount}})
+}
+function buildNoseHull(lm, mode){
+ // MediaPipe Face Meshの「鼻周辺」に限定したランドマーク群から輪郭を作る。
+ // 頬・口周辺の点は使わないため、斜め顔でも鼻だけを囲みやすい。
+ const ids = mode==='front'
+   ? [6,197,195,5,4,1,2,98,129,209,217,218,240,358,327]
+   : [6,197,195,5,4,1,2,98,129,209,217,218,240,358,327,278,49];
+ let pts=ids.map(i=>point(lm,i)).filter(p=>p.x>=0&&p.x<=1&&p.y>=0&&p.y<=1);
+ let hull=convexHull(pts);
+ const eyeL=point(lm,33),eyeR=point(lm,263),eyeDist=dist(eyeL,eyeR);
+ // 斜め・横顔はランドマークの片側が圧縮されるため、わずかに外側へ拡張。
+ const expand = mode==='front' ? eyeDist*.012 : mode==='oblique' ? eyeDist*.025 : eyeDist*.035;
+ return expandPoly(hull,expand);
+}
+function buildObliqueMask(lm){ return buildNoseHull(lm,'oblique'); }
 function buildProfileMask(lm){
- const by=i=>({x:lm[i].x,y:lm[i].y});
- const bridge=by(6), upper=by(197), mid=by(195), tip=by(4), tipA=by(1), lower=by(2), root=by(168);
- const eyeL=by(33),eyeR=by(263),eyeDist=Math.hypot(eyeR.x-eyeL.x,eyeR.y-eyeL.y)||.1;
- // 横顔では左右の鼻翼ランドマークを信用せず、鼻背→鼻尖→鼻柱の可視輪郭を中心に領域を作る。
- const dx=tip.x-bridge.x,dy=tip.y-bridge.y,len=Math.hypot(dx,dy)||.001;
- const nx=-dy/len,ny=dx/len;
- const thick=eyeDist*.16;
- const p=(q,t)=>({x:q.x+nx*thick*t,y:q.y+ny*thick*t});
- let poly=[
-   p(root,-.65),p(bridge,-.75),p(upper,-.9),p(mid,-1),
-   p(tip,.65),p(tipA,1),p(lower,.85),
-   p(tip,-.95),p(mid,.75),p(upper,.7),p(bridge,.65)
- ];
- return shrinkMask(poly,.98,1);
-}
-function shrinkMask(poly,sx,sy){
- const cx=poly.reduce((s,p)=>s+p.x,0)/poly.length,cy=poly.reduce((s,p)=>s+p.y,0)/poly.length;
- return poly.map(p=>({x:cx+(p.x-cx)*sx,y:cy+(p.y-cy)*sy}));
+ // 横顔は左右対称を前提にせず、鼻の中心線方向に沿った可視輪郭を使う。
+ return buildNoseHull(lm,'profile');
 }
 function detectMode(i){ return i===2 ? "front" : (i===0||i===4 ? "profile" : "oblique"); }
 
@@ -207,14 +201,23 @@ document.getElementById("detect").onclick=async()=>{
  if(!img)return;const b=document.getElementById("detect");b.disabled=true;
  const mode=detectMode(current);
  status(`${mode==="front"?"正面":mode==="oblique"?"斜め顔":"横顔"}用の判定ロジックで解析しています…`,"wait");
- const lm=await runLandmark();
- if(!lm){status("自動判定に失敗しました。手動指定を使用できます。","err");b.disabled=false;return}
+ let lm=await runLandmark();
+ // 横顔・強い斜め顔では1回目の検出を落とすことがあるため、少し待って再試行。
+ if(!lm && mode!=='front'){
+   await new Promise(r=>setTimeout(r,120));
+   lm=await runLandmark();
+ }
+ if(!lm){status("自動判定に失敗しました。横顔・斜め顔は手動指定を使用できます。","err");b.disabled=false;return}
  const ids=[168,6,197,195,5,4,1,2,98,327,129,358];
  const by=i=>({x:lm[i].x,y:lm[i].y});
  points=ids.map(by);
  if(mode==="front") mask=buildFrontalMask(lm);
  else if(mode==="oblique") mask=buildObliqueMask(lm);
  else mask=buildProfileMask(lm);
+ // 極端に小さい/細いマスクは誤判定として扱う
+ const xs=mask.map(p=>p.x),ys=mask.map(p=>p.y);
+ const mw=Math.max(...xs)-Math.min(...xs),mh=Math.max(...ys)-Math.min(...ys);
+ if(mw<.015 || mh<.03){status("鼻領域を十分に取得できませんでした。手動指定を使用してください。","err");b.disabled=false;return}
  const eyeL=by(33),eyeR=by(263),eyeDist=Math.hypot(eyeR.x-eyeL.x,eyeR.y-eyeL.y);
  const center={x:(eyeL.x+eyeR.x)/2,y:(eyeL.y+eyeR.y)/2};
  const yaw=(mode==="front"?0:(eyeR.x-eyeL.x));
